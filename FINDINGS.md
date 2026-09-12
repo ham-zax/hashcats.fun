@@ -4,7 +4,7 @@ Observed 2026-09-12. Companion: [native mining plan for RTX 3070 Ti](NATIVE-MINI
 
 ## Result
 
-The checked protocol uses a 116-byte packed Ethereum Keccak-256 preimage. Five reference inputs matched the deployed contract's hash function. A native CUDA client can implement this work, but its speedup over the reported 1.25 GH/s browser baseline remains unmeasured.
+The checked protocol uses a 116-byte packed Ethereum Keccak-256 preimage. Five reference inputs matched the deployed contract's hash function. A native CUDA client now implements this work. **Native end-to-end results of about 1.19 GH/s in a short run and 1.09 GH/s in the final 30-second run do not beat the user's 1.25–1.30 GH/s browser baseline.** See [implementation evidence](IMPLEMENTATION.md) for tests, live shadow observations and tuning updates, and [README.md](README.md) for use. The sections below preserve the earlier investigation's evidence and limits at that time.
 
 The managed Windows browser successfully rendered the mining and documentation pages. Its WebGPU adapter was real NVIDIA Ampere hardware. The site has identifiable device and batching limits; none has yet been shown to constrain useful mining throughput.
 

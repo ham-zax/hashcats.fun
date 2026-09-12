@@ -1,6 +1,6 @@
 # Hashcats native mining plan — RTX 3070 Ti
 
-Prepared 2026-09-12. Scope: a technical plan for increasing accepted mining work and reducing submission delay. This document does not implement or run a miner, change GPU/browser settings, connect a wallet, or submit transactions. No GPU benchmark was performed; **1.25 GH/s is your reported WebGPU baseline**.
+Prepared 2026-09-12 as a technical design. **Implementation update:** a working native CLI, CUDA worker, local signer and recovery journal now exist. Use [README.md](README.md) for commands and [IMPLEMENTATION.md](IMPLEMENTATION.md) for measured throughput and test status. The original investigation below preceded native benchmarking; proposed features are not all delivered. No real wallet was imported or paid mainnet transaction sent during development.
 
 See [FINDINGS.md](FINDINGS.md) for the evidence ledger, including the subsequent Windows browser inspection and measured adapter/device limits.
 

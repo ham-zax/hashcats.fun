@@ -1,0 +1,9 @@
+node_modules/
+reports/
+build/
+.cuda/
+.env
+*.keystore.json
+*.journal.jsonl
+*.journal.jsonl.interrupted-*
+*.journal.jsonl.lock

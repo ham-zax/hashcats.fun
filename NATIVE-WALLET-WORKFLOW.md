@@ -1,6 +1,6 @@
 # Native wallet workflow — Robinhood Wallet on iPhone
 
-Decision recorded 2026-09-12: use unattended local signing for the new mining wallet. The iPhone app is for viewing/managing the wallet; the native mining process will sign and submit directly. This is a proposed implementation specification, not an installed wallet importer or working miner.
+Decision recorded 2026-09-12: use unattended local signing for the new mining wallet. The iPhone app is for viewing/managing the wallet; the native mining process signs and submits directly. **Implementation update:** the local importer, encrypted account keystore, offline signing checks, transaction journal and native miner now exist. See [README.md](README.md) for the exact commands and recovery limits, and [IMPLEMENTATION.md](IMPLEMENTATION.md) for verification. No user wallet has yet been imported and no paid mainnet mint has been tested. The sections below are the design specification, including features or guarantees that must be checked against current implementation status.
 
 Companions: [mining plan](NATIVE-MINING-PLAN.md) and [verified findings](FINDINGS.md).
 
@@ -16,7 +16,7 @@ The engineering objective is to discover wallet/configuration bugs **before sear
 
 The user's twelve words are a secret recovery phrase, not twelve private keys. Robinhood distinguishes the recovery phrase from an individual account's transaction-signing private key. This workflow assumes the self-custody **Robinhood Wallet** app, consistent with having a recovery phrase. [Robinhood Wallet FAQ](https://robinhood.com/us/en/support/articles/robinhood-wallet-faqs/).
 
-Human setup, once the local import command exists:
+Human setup using `npm run wallet -- import --address 0xYOUR_FULL_IPHONE_ADDRESS`:
 
 1. In Robinhood Wallet on the iPhone, copy the new wallet's public `0x…` address for the EVM/Robinhood Chain account. This is the expected mining address.
 2. Run the importer locally on the mining PC. Enter the recovery phrase into a hidden terminal prompt, not a command-line argument or chat message.
@@ -31,7 +31,7 @@ After inclusion, the NFT belongs to the on-chain recipient address. Whether the 
 
 ## 2. Chosen implementation
 
-Use **CUDA C++ for nonce searching** and **Node.js with ethers v6 for the host controller and signer**. Choose and lock a concrete ethers release during implementation. Node is already available in this workspace; no wallet dependency was installed for this document.
+Use **CUDA C++ for nonce searching** and **Node.js with ethers v6 for the host controller and signer**. The implementation locks ethers **6.17.0** in the package manifest and lockfile.
 
 The host owns chain state, candidate verification, ABI encoding, account transaction nonces, signing, broadcasting and receipts. A local CUDA worker receives public job data and returns candidate records over a framed pipe. GPU batches keep running independently of normal asynchronous host RPC activity. A pipe disconnect terminates/pause-stops GPU search instead of leaving an orphan miner.
 

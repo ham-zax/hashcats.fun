@@ -1,0 +1,26 @@
+{
+  "name": "hashcats-native",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Native CUDA Hashcats miner with local signing and recoverable submissions",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node src/cli.mjs",
+    "wallet": "node src/cli.mjs wallet",
+    "doctor": "node src/cli.mjs doctor",
+    "build": "node scripts/build.mjs",
+    "test": "node --test test/*.test.mjs",
+    "test:gpu": "node scripts/verify-gpu.mjs",
+    "benchmark": "node src/cli.mjs benchmark"
+  },
+  "dependencies": {
+    "ethers": "6.17.0"
+  },
+  "devDependencies": {
+    "ganache": "7.9.2",
+    "solc": "0.8.37"
+  }
+}
