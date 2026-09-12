@@ -2,6 +2,8 @@
 
 Prepared 2026-09-12. Scope: a technical plan for increasing accepted mining work and reducing submission delay. This document does not implement or run a miner, change GPU/browser settings, connect a wallet, or submit transactions. No GPU benchmark was performed; **1.25 GH/s is your reported WebGPU baseline**.
 
+See [FINDINGS.md](FINDINGS.md) for the evidence ledger, including the subsequent Windows browser inspection and measured adapter/device limits.
+
 ## Recommendation
 
 Build a small native CUDA search engine with a host-side chain watcher, independent CPU verifier, and transaction submitter. Start with short, bounded GPU batches and one mining address. Establish correctness and measure useful throughput before adding persistent kernels, extra streams, address rotation, or aggressive scheduling.
@@ -40,7 +42,7 @@ Frontend evidence:
 - Saved main bundle: `/tmp/opencode/hashcats/index.js`, SHA-256 `97beff268571b5235f9802fcffbace05ed9adcb19240a4c9c7b2495dcde2eb91`.
 - [GPU worker](https://hashcats.fun/assets/gpu.worker-BNBpr-u3.js), fetched and inspected during this work.
 - [CPU/WASM worker](https://hashcats.fun/assets/cpu.worker-CzK-dBIZ.js), fetched and inspected during this work.
-- [Public documentation](https://hashcats.fun/docs). The existing Khiip `/docs` capture contains page metadata but no substantive rendered documentation; protocol claims below rely on inspected bundle/worker content and the specific RPC reads, rather than that empty capture.
+- [Public documentation](https://hashcats.fun/docs). The existing Khiip `/docs` capture contains page metadata but no substantive rendered documentation. The rendered mining/difficulty sections were subsequently inspected in the managed Windows browser; distinguish their protocol descriptions from the specific contract reads and hash comparisons completed here.
 
 Frontend code establishes client behavior; it does not prove every contract authorization rule or future parameter value. This work did not repeat the broader audit, ownership, liquidity or wallet-safety investigation.
 
@@ -57,6 +59,8 @@ The inspected GPU worker already:
 - Returns candidate nonce/depth pairs, with adaptive candidate filtering, and recalculates candidate hashes on the CPU.
 
 These are implementation and device constraints, not evidence of a universal browser percentage cap. Raising a dispatch ceiling alone need not help; it may only delay result delivery and job replacement. Source: [GPU worker](https://hashcats.fun/assets/gpu.worker-BNBpr-u3.js).
+
+**Windows observation, 16:50 UTC:** the high-performance adapter reported NVIDIA Ampere, `isFallbackAdapter = false`, and 1,024 maximum invocations per workgroup. A temporary device created with the site's default `requestDevice()` options reported 256. It was destroyed without dispatching compute. The device allowed 65,535 workgroups per dimension, whereas the worker imposes its own 32,768 ceiling. The adapter did not expose an exact model name. These observations identify limits, not a measured performance loss; see [the complete findings](FINDINGS.md).
 
 Native CUDA removes dependence on this browser worker and its dispatch/readback policy. Keep the normal driver watchdog and stable power settings during initial development. Use bounded kernels; a continuously running kernel is not a prerequisite for native mining.
 
@@ -206,7 +210,9 @@ Do not wait for a seed time bucket or discard otherwise valid solutions for hope
 
 ## 7. Fast, correct submission
 
-Prepare the sender, pending transaction nonce, chain ID, destination, payment ceiling and fee policy before searching. A native client needs a defined signer: manual wallet confirmation introduces human latency, while unattended signing introduces key custody and spending-policy requirements. Start with unsigned transaction construction and simulation; do not put private keys in worker messages, source files or telemetry.
+The selected approach is unattended local signing for the user's Robinhood Wallet on iPhone, after a one-time local import and exact address match. Follow [NATIVE-WALLET-WORKFLOW.md](NATIVE-WALLET-WORKFLOW.md) for setup, readiness gates, explicit transaction construction, durable journaling and recovery. That document resolves the earlier signer choice; no signer has been implemented yet.
+
+Prepare the sender, pending transaction nonce, chain ID, destination, payment ceiling and fee policy before searching. Start with unsigned transaction construction and simulation. Once operational, unlock the signer before arming the miner, without phone prompts on each solution.
 
 The direct payable `mine` path inspected here does not require an ERC-20 allowance. “Pre-approve the chain” is not an on-chain authorization step.
 
@@ -215,7 +221,7 @@ On a candidate:
 1. Recover its original job and recompute its hash on CPU.
 2. Check previous work, anchor lifetime, sender target and entry price against sufficiently fresh state. Reject if the price exceeds the configured maximum.
 3. Construct `mine(foundNonce, originalAnchorBlock)` from the original miner address, with the required ETH value.
-4. Initially simulate as the site does, then sign and broadcast promptly. Simulation reduces avoidable failures but is not a reservation; another mint can still win first. Measure its latency before considering removal from a later production path.
+4. Initially simulate through a fresh gas-estimation execution of the fully specified call, then sign and broadcast promptly. The native wallet workflow uses that execution check without an additional redundant `eth_call`. Simulation reduces avoidable failures but is not a reservation; another mint can still win first. Measure its latency before considering removal from a later production path.
 5. Track the transaction hash, receipt status and mint event. A returned transaction hash is not proof of success.
 
 The saved site client reads price, simulates, estimates gas, asks its wallet to send, and waits for the receipt. Native operation can reduce avoidable setup and human delay, but gas premiums do not establish guaranteed next-block ordering on this sequencer. The one-cat-per-block claim also does not imply exactly one cat every block.
@@ -267,7 +273,7 @@ No additional agents are required. These can be assigned manually; implementatio
 1. **Protocol verification:** extract the ABI from the saved main bundle; reproduce section 3's vectors with an independent local Keccak implementation; verify exact target comparison and anchor-boundary behavior with read-only calls or a local harness. Deliver a small spec/vector artifact. No wallet keys or paid transactions.
 2. **Offline CUDA prototype:** implement only nonce search and diagnostic full-digest output for `sm_86`; use explicit nonce ranges and bounded batches. Deliver correctness results and matched timing/power measurements against the reported baseline. No live signer.
 3. **Watcher and unsigned submit path:** build coherent jobs from chain reads; handle mint changes, anchor expiry and reconnects; construct/simulate `mine` transactions with the original anchor. Deliver latency and stale-work evidence. No broadcast.
-4. **Integration:** connect verified search to the watcher, then configure signing and spending limits for any separately requested paid operation. Add complexity only for a demonstrated bottleneck.
+4. **Wallet readiness and integration:** implement the selected [local signing workflow](NATIVE-WALLET-WORKFLOW.md), validate it offline and in controlled integration scenarios before attaching paid mining, then connect verified search to the watcher. Configure the user's chosen spending limits before any paid operation. Add complexity only for a demonstrated bottleneck.
 
 An independent documentation-only task can check OS-specific CUDA/watchdog prerequisites. It need not block the portable protocol and offline search work.
 
@@ -282,4 +288,4 @@ Known source URLs were archived through the running Khiip daemon. Open WebSearch
 | CUDA Best Practices | `01M2B83QH0G46K87DSR0YJ4PRB` | `/home/hamza/khiip-vault/captures/web/cuda-best-practices-guide.md` |
 | NVIDIA GPU capabilities | `01M2B85FNWH57X69VS3DEAQDAZ` | `/home/hamza/khiip-vault/captures/web/nvidia-cuda-gpu-compute-capability.md` |
 
-Live RPC observations and vector outputs are recorded in this document with their block tags. No independent RPC-provider comparison, CUDA run, browser benchmark, or wallet interaction was performed.
+Live RPC observations and vector outputs are recorded in this document with their block tags. Browser observations are recorded in [FINDINGS.md](FINDINGS.md). No independent RPC-provider comparison, CUDA run, browser benchmark, or wallet interaction was performed.
