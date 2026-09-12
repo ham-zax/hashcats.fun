@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { Gpu, randomNoncePrefix, COUNTER_LIMIT } from "./gpu.mjs";
+import { randomNoncePrefix, COUNTER_LIMIT } from "./gpu.mjs";
+import { GpuPool } from "./gpu-pool.mjs";
 import {
   checkGoldenVectors,
   GOLDEN_VECTORS,
@@ -32,7 +33,8 @@ export async function mine({
   targetMs = 15,
   signal,
   onEvent = console.log,
-  gpu = new Gpu(),
+  gpus = "all",
+  gpu = new GpuPool({ selection: gpus }),
 }) {
   let stopped = false,
     latest = null,
@@ -85,6 +87,7 @@ export async function mine({
       lastReport = Date.now(),
       intervalHashes = 0,
       minted = 0,
+      foundCount = 0,
       armed = false;
     while (alive()) {
       if (submitter?.journal.pending().length) {
@@ -147,7 +150,9 @@ export async function mine({
           nonce,
           hash: found.hash,
           anchorBlock: found.anchorBlock,
+          deviceIndex: candidate.deviceIndex,
         });
+        foundCount++;
         if (submitter) {
           try {
             emit({ type: "submission", ...(await submitter.submit(found)) });
@@ -171,26 +176,28 @@ export async function mine({
       const desired = Math.floor(
         (batchSize * targetMs) / Math.max(batch.ms, 0.1),
       );
-      batchSize =
-        Math.max(
-          4096,
-          Math.min(
-            1 << 24,
-            Math.max(batchSize / 2, Math.min(batchSize * 2, desired)),
-          ),
-        ) & ~127;
+      batchSize = Math.max(
+        4096,
+        Math.min(
+          gpu.maxBatchSize ?? 1 << 24,
+          Math.max(batchSize / 2, Math.min(batchSize * 2, desired)),
+        ),
+      );
+      batchSize = Math.floor(batchSize / 128) * 128;
       if (Date.now() - lastReport >= 1000) {
         emit({
           type: "progress",
           hashes,
           hashesPerSecond: (intervalHashes * 1000) / (Date.now() - lastReport),
           minted,
+          found: foundCount,
           totalMinted: job.totalMinted,
           epoch: job.epoch,
           priceWei: job.price,
           target: job.target,
           rpcMs: job.rpcMs,
           batchMs: batch.ms,
+          devices: batch.devices,
         });
         intervalHashes = 0;
         lastReport = Date.now();
@@ -199,6 +206,7 @@ export async function mine({
     return {
       hashes,
       minted,
+      found: foundCount,
       pending: submitter?.journal.pending().map((item) => item.hash) ?? [],
     };
   } finally {

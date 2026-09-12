@@ -156,10 +156,29 @@ export class Submitter {
       const gasLimit = (estimate * 125n + 99n) / 100n;
       if (gasLimit > 1000000n || gasLimit * gasPrice > this.maxGasCost)
         throw new Error("Estimated gas exceeds configured ceiling");
-      const fresh = await this.rpc.snapshot(this.wallet.address);
+      // The account nonce was read before gas estimation. Re-read it here so
+      // an external use of this wallet cannot silently shift the signing nonce
+      // between estimation and signing. This process never submits
+      // concurrently (busy + journal-pending guard above), so any change is
+      // external and must reconcile before a new submission.
+      const [fresh, latest2, pending2] = await Promise.all([
+        this.rpc.snapshot(this.wallet.address),
+        this.rpc
+          .call("eth_getTransactionCount", [this.wallet.address, "latest"])
+          .then(BigInt),
+        this.rpc
+          .call("eth_getTransactionCount", [this.wallet.address, "pending"])
+          .then(BigInt),
+      ]);
+      // A slow nonce response can age the snapshot while these reads run.
+      // Keep every final validation after the whole read set has completed.
       assertFresh(candidate, fresh, { margin: this.anchorMargin });
       if (fresh.price !== current.price)
         throw new StaleProofError("Mint price changed during estimation");
+      if (pending2 !== account.pending || latest2 !== account.latest)
+        throw new Error(
+          "Account nonce changed during estimation; run recover before submitting",
+        );
       const request = {
         type: 0,
         chainId: this.rpc.chainId,

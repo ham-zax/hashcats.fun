@@ -54,15 +54,43 @@ Words padded(const std::string& input) {
   return words;
 }
 
+std::string deviceUuid(CUdevice device) {
+  CUuuid uuid;
+  check(cuDeviceGetUuid(&uuid, device));
+  const std::string raw = hex(uuid.bytes, 16).substr(2);
+  return "GPU-" + raw.substr(0,8) + "-" + raw.substr(8,4) + "-" + raw.substr(12,4)
+    + "-" + raw.substr(16,4) + "-" + raw.substr(20);
+}
+
 int main(int argc, char** argv) {
   try {
-    if (argc != 2) throw std::runtime_error("Usage: hashcats-gpu /path/to/keccak.cu");
+    if (argc < 2 || argc > 3) throw std::runtime_error("Usage: hashcats-gpu --list | /path/to/keccak.cu [device-index]");
+    check(cuInit(0));
+    int deviceCount;
+    check(cuDeviceGetCount(&deviceCount));
+    if (std::string(argv[1]) == "--list") {
+      std::cout << "[";
+      for (int index=0; index<deviceCount; ++index) {
+        CUdevice found;
+        char name[256];
+        check(cuDeviceGet(&found, index));
+        check(cuDeviceGetName(name, sizeof(name), found));
+        std::cout << (index ? "," : "") << "{\"index\":" << index << ",\"name\":" << std::quoted(name)
+          << ",\"uuid\":\"" << deviceUuid(found) << "\"}";
+      }
+      std::cout << "]" << std::endl;
+      return 0;
+    }
+    const std::string indexText = argc == 3 ? argv[2] : "0";
+    if (indexText.empty() || indexText.find_first_not_of("0123456789") != std::string::npos)
+      throw std::runtime_error("Invalid CUDA device index");
+    const int deviceIndex = std::stoi(indexText);
+    if (deviceIndex >= deviceCount) throw std::runtime_error("CUDA device index is not visible");
     std::ifstream file(argv[1]);
     if (!file) throw std::runtime_error("Cannot read CUDA source");
     const std::string source((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-    check(cuInit(0));
     CUdevice device;
-    check(cuDeviceGet(&device, 0));
+    check(cuDeviceGet(&device, deviceIndex));
     CUcontext context;
     check(cuDevicePrimaryCtxRetain(&context, device));
     check(cuCtxSetCurrent(context));
@@ -106,7 +134,8 @@ int main(int argc, char** argv) {
     int registers;
     check(cuFuncGetAttribute(&registers, CU_FUNC_ATTRIBUTE_NUM_REGS, search));
     std::cout << "{\"type\":\"ready\",\"device\":\"" << name << "\",\"sm\":" << major*10+minor
-      << ",\"registers\":" << registers << "}" << std::endl;
+      << ",\"registers\":" << registers << ",\"deviceIndex\":" << deviceIndex
+      << ",\"uuid\":\"" << deviceUuid(device) << "\"}" << std::endl;
     std::string line;
     while (std::getline(std::cin, line)) {
       if (line.size() > 2048) throw std::runtime_error("Oversized worker command");

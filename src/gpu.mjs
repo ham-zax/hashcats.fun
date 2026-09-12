@@ -1,4 +1,5 @@
-import { spawn } from "node:child_process";
+import { spawn, execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { randomBytes } from "node:crypto";
@@ -13,13 +14,32 @@ export const COUNTER_LIMIT = 1n << 64n;
 export const randomNoncePrefix = () =>
   BigInt(`0x${randomBytes(24).toString("hex")}`) << 64n;
 
+export async function listGpus() {
+  const { stdout } = await promisify(execFile)(executable, ["--list"], {
+    timeout: 10000,
+  });
+  const devices = JSON.parse(stdout);
+  if (
+    !Array.isArray(devices) ||
+    devices.some(
+      (device) => !Number.isSafeInteger(device.index) || device.index < 0,
+    )
+  )
+    throw new Error("Invalid CUDA device list; rebuild the worker");
+  return devices;
+}
+
 export class Gpu {
-  constructor() {
+  constructor(deviceIndex = 0) {
+    if (!Number.isSafeInteger(deviceIndex) || deviceIndex < 0)
+      throw new Error("Invalid GPU index");
+    this.deviceIndex = deviceIndex;
+    this.maxBatchSize = 1 << 24;
     this.kernelPath = kernel;
     this.kernelName = "64";
     this.sequence = 0;
     this.pending = new Map();
-    this.process = spawn(executable, [kernel], {
+    this.process = spawn(executable, [kernel, String(deviceIndex)], {
       stdio: ["pipe", "pipe", "inherit"],
     });
     this.ready = new Promise((resolve, reject) => {
@@ -51,7 +71,9 @@ export class Gpu {
     });
     this.process.on("error", (error) => this.fail(error));
     this.process.on("exit", (code, signal) =>
-      this.fail(new Error(`GPU worker exited (${signal ?? code})`)),
+      this.fail(
+        new Error(`GPU ${deviceIndex} worker exited (${signal ?? code})`),
+      ),
     );
     this.process.stdin.on("error", (error) => this.fail(error));
   }
@@ -69,6 +91,7 @@ export class Gpu {
 
   async request(operation, input, suffix = "") {
     await this.ready;
+    if (this.closed) throw new Error(`GPU ${this.deviceIndex} is closed`);
     if (this.error) throw this.error;
     const id = ++this.sequence;
     return new Promise((resolve, reject) => {

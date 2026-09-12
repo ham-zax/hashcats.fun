@@ -1,39 +1,122 @@
 # Hashcats Native
 
-A working CUDA + Node.js command-line miner for Hashcats on Robinhood Chain. It searches on the RTX 3070 Ti without a browser and supports unattended local signing after one password prompt at startup.
+**Mine Hashcats from your terminal. No browser. No WebGPU. One GPU or a multi-GPU machine.**
 
-**This is an experimental client, not a guaranteed win or a demonstrated speedup over WebGPU.** Native measured about **1.19 GH/s in a short run and 1.09 GH/s in the final 30-second run**, below Hamza's reported **1.25–1.30 GH/s** browser baseline. Current tuning and verification results are recorded in [IMPLEMENTATION.md](IMPLEMENTATION.md).
+> **Current hardware support: NVIDIA CUDA GPUs only.** AMD, Intel and Apple GPUs are not supported in this release.
+
+Hashcats Native is an independent CUDA + Node.js command-line miner for [Hashcats](https://hashcats.fun/) on Robinhood Chain. Its purpose is to take proof-of-work search out of a browser tab and make it usable on a personal NVIDIA GPU, a multi-GPU workstation, or a compatible headless Linux GPU server managed over SSH. The same controller searches, verifies proofs and supports unattended local signing after one password prompt at startup.
+
+- **Browser-independent:** no Chrome, browser extension, WebGPU, graphical desktop or open mining tab is required by the miner.
+- **Multi-GPU by default:** all CUDA-visible NVIDIA GPUs on one host contribute distinct work to the same mining account.
+- **Headless operation:** run from a local terminal or an SSH session on compatible rented GPU hardware.
+- **Measured throughput:** benchmark without a wallet or chain connection; report aggregate and per-device rates.
+- **One submission controller:** CPU verification, explicit spending limits and a durable transaction journal accompany local signing.
+
+This is not a mining pool, network-distributed scheduler, or official Hashcats client. It does not bypass proof requirements or the NFT mint payment.
+
+**Experimental—not a guaranteed win, profit, or demonstrated speedup over WebGPU.** On the tested RTX 3070 Ti, native measured **1.192 GH/s median across 3×30 s (128 threads)** and **1.167 GH/s median (256 threads)**, below the user's reported **1.25–1.30 GH/s** browser baseline. Removing the browser enables a different deployment and submission workflow; it does not automatically make the same GPU faster. Current tuning and verification results are recorded in [IMPLEMENTATION.md](IMPLEMENTATION.md).
 
 Implemented: chain snapshots, full-target CUDA search, independent CPU checks, encrypted account import, spending limits, gas estimation, signing, parallel identical-byte broadcasting, receipt tracking and a durable transaction journal. No real wallet has been imported or paid mainnet mint submitted during development.
 
 ## 1. Build and check
 
-This checkout has already been built on Hamza's WSL machine. To reproduce:
+### Is cloning and `npm install` enough?
+
+**No. The source is included, but NVIDIA drivers and the CUDA toolchain are external prerequisites.** `npm install` (or `npm i`) installs JavaScript dependencies; it does not install a driver, enable GPU passthrough, install the NVRTC runtime, or compile the miner. Use `npm ci --ignore-scripts` for the lockfile-pinned install, then explicitly build.
+
+This checkout is intended to run from source, not via `npm install hashcats-native`. The package's `private: true` setting prevents accidental npm publication; it does not prevent cloning the repository and installing its dependencies.
+
+| Dependency | How it is supplied |
+| --- | --- |
+| Node.js 22+ and npm | Install on the host; development checks used Node 24 |
+| JavaScript libraries | `npm ci --ignore-scripts` from the committed lockfile; includes development/test dependencies |
+| NVIDIA GPU and compatible driver | Supplied/configured by the host or cloud provider; not installed by npm |
+| Linux x86-64 userspace and g++ with C++17 | Supplied by the OS/image; WSL2 is the locally tested environment |
+| CUDA 13.1 NVRTC runtime, built-ins and development headers | Supplied by the CUDA installation; `nvcc` is not required |
+| Native worker executable | Built locally with `npm run build`; not shipped as a prebuilt binary |
+
+A GPU-capable driver alone is not a CUDA toolkit installation. An image with only runtime libraries may also lack the headers/compiler needed to build. The selected GPU architecture must be supported by the installed NVRTC compiler. CUDA 13.1 is the tested toolchain, not a claim that every historical NVIDIA GPU works.
+
+After cloning this repository, enter its checkout directory and run:
 
 ```bash
-cd /home/hamza/repo/hashcat
+node --version
+nvidia-smi
 npm ci --ignore-scripts
 npm run build
+npm start -- devices
 npm test
 npm run test:gpu
 npm run doctor
-npm run benchmark -- --seconds 30
+npm run benchmark -- --seconds 30 --runs 3
 ```
 
-Requirements: Node.js 22+, g++, NVIDIA CUDA driver access, and the CUDA 13.1 NVRTC runtime. The build uses NVRTC at runtime, so `nvcc` is not required. On this machine, missing CUDA headers are downloaded from the configured NVIDIA apt repository into ignored `.cuda/` files, without sudo or system package installation. Rebuilds reuse them.
+`test:gpu` independently compares one million CUDA digests with the CPU reference by default; it can take several minutes. `doctor` also checks the configured chain RPCs; `devices`, `test:gpu` and `benchmark` do not need a funded wallet or broadcast transactions.
 
-The defaults target the installed WSL paths. `HASHCATS_CUDA_ROOT` and `HASHCATS_CUDA_DRIVER` override the runtime root and `libcuda.so.1` path. Automatic header downloading is specifically for CUDA 13.1. Other toolchain/platform combinations have not been tested.
+If headers are missing, the build can download CUDA 13.1 development packages into ignored `.cuda/` files **only when `apt-get`, `dpkg-deb` and the matching NVIDIA apt repository are already available**. This does not bootstrap the driver or NVRTC runtime. Preinstalled matching development headers avoid that fallback. Rebuilds reuse cached headers.
+
+The build detects common WSL and Linux driver-library paths. `HASHCATS_CUDA_ROOT` and `HASHCATS_CUDA_DRIVER` override the runtime root and `libcuda.so.1` path. Automatic header downloading is specifically for CUDA 13.1. Other toolchain/platform combinations have not been tested.
 
 Close other GPU miners before benchmarking. `wallMHs` includes host/batch overhead and CPU sample verification; divide it by 1,000 for GH/s. `kernelMHs` excludes some host overhead and is **not** the headline speed. A benchmark uses fixed public inputs, no wallet and no RPC.
 
-## 2. Connect your iPhone wallet locally
+### Multiple GPUs in one PC
 
-You do **not** need MetaMask, WalletConnect, an open browser or per-mint iPhone approval. The local process uses the same account's signing key. Keep the twelve-word recovery phrase out of chat, command-line arguments, logs and this repository.
-
-Copy the new wallet's full public EVM address from Robinhood Wallet, then run this yourself in an interactive local terminal, replacing the placeholder:
+**All CUDA-visible NVIDIA GPUs are used by default** by `mine`, `benchmark` and `doctor`. Rebuild the worker after updating this checkout. No network cluster, separate wallets, SLI or NVLink is needed.
 
 ```bash
-npm run wallet -- import --address 0xYOUR_FULL_IPHONE_ADDRESS
+npm start -- devices
+npm run benchmark -- --seconds 30 --runs 3
+npm run benchmark -- --gpus 0,1 --seconds 30 --runs 3
+npm start -- mine --gpus 0,1 --seconds 30
+```
+
+The last command is shadow mining, not a paid mint. Omit `--gpus` to use all devices; use `--gpus 0` for only the first. The same option applies to explicit live mining below. Missing or duplicate indices are rejected. These are **CUDA-visible indices**, not necessarily `nvidia-smi` indices: `CUDA_VISIBLE_DEVICES` can hide/reorder cards. Run `devices` with the same environment you will use for mining. Benchmark telemetry identifies physical cards by UUID.
+
+Each GPU has a separate native worker. One controller allocates non-overlapping nonce ranges, dispatches them concurrently and adjusts work shares using measured per-device rates. Every selected GPU checks the startup golden vectors; each search batch has a CPU-checked sample per active GPU. Returned candidates are CPU-verified before submission. All GPUs share **one wallet, one transaction nonce manager, one spending budget and one journal**. Simultaneous candidates do not trigger parallel purchases.
+
+`progress.hashesPerSecond` is the aggregate rate, not the rate of each card. Its `devices` array contains each device's last-batch count and time. Benchmark reports additionally contain per-device hashes and wall-clock MH/s; those rates sum to the aggregate.
+
+Scheduling uses bounded parallel batches, waiting for all assigned devices before processing results. It adapts shares for different card speeds, but a slow/stalled worker can delay the batch; a worker error stops the entire pool. This is not an independent continuous queue per GPU. More cards should increase search throughput, but linear scaling and a particular combined GH/s are **not measured or guaranteed**. AMD/Intel GPUs and native Windows builds are not supported by this CUDA/Linux build path.
+
+Validation here uses three simulated GPU workers plus the one physical RTX 3070 Ti available locally. A real two-or-more-card benchmark remains necessary on your multi-GPU PC. `npm run test:gpu` distributes the total digest-comparison count across visible GPUs; to check one specific card, run `HASHCATS_GPUS=1 npm run test:gpu` (using a listed index).
+
+### Remote and rented GPU servers
+
+The intended deployment model is **one compatible Linux GPU host, reached over SSH**. That can be your own server or an instance obtained through services such as [Vast.ai](https://docs.vast.ai/guides/instances/connect/ssh), [Shadeform](https://docs.shadeform.ai/getting-started/introduction), or [Lambda](https://docs.lambda.ai/public-cloud/). These links describe provider access/services, not tested integrations or endorsements. **No deployment on these providers has been validated for this repository.** It will not run on literally any server: the prerequisites above and actual CUDA device access are required.
+
+Before paying for an instance, confirm that the provider permits this workload and that its selected image offers a long-running shell, NVIDIA GPU access, a compatible driver/toolkit, and persistent storage. Serverless inference endpoints are not interchangeable with an SSH-accessible GPU machine. No provider API, paid service, container image or one-click installer is bundled here.
+
+1. Provision the compatible host yourself and connect over SSH. For a container, ensure the host exposes the GPU devices and NVIDIA driver libraries to it.
+2. Clone, install, build and run the checks above. Benchmark **before importing or funding a wallet**. Test each GPU separately if comparing models, then test the combined configuration.
+3. Use a terminal multiplexer such as `tmux` if you want a session to survive an SSH disconnect. If installed, `tmux new -s hashcats` starts one; detach with `Ctrl+B`, then `D`, and return with `tmux attach -t hashcats`. This does not survive the host being terminated or rebooted.
+4. Complete wallet setup and a shadow rehearsal below. Paid mining still requires explicitly chosen limits. A remote host's operator can potentially access a running signer: use a dedicated, limited-funds account, not your main wallet.
+5. Keep the encrypted keystore and transaction journal on persistent storage and back them up before terminating a rental. Restarting requires unlocking again. Never run multiple controllers on different hosts using the same signing account; network-wide transaction coordination is not implemented.
+
+### What GPU capability matters?
+
+**Optimize for sustained, verified Keccak-256 integer/bitwise throughput—not VRAM capacity or advertised AI TFLOPS.** This miner uses GPU compute; saying it does not need compute would be incorrect. It uses CUDA directly, not throughput routed through WebGPU.
+
+The [search kernel](native/keccak.cu) repeatedly executes XOR, AND, NOT, rotations and integer operations over a small Keccak state. It does not load an AI model or a large mining DAG, and it does not use tensor cores or floating-point math. There is GPU memory overhead for the CUDA context/compiler and buffers, so “zero VRAM needed” would also be wrong. Extra VRAM capacity by itself does not increase this kernel's hashes per second.
+
+Useful factors are the GPU's integer/bitwise execution behavior, sustained clocks, register pressure, compiler-generated instructions and ability to keep useful work running concurrently. Registers, occupancy and spilling interact; neither maximum occupancy nor the lowest register count guarantees the best result. NVIDIA discusses those tradeoffs in its [CUDA Best Practices Guide](https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/). This is why CUDA-core counts, FP32/FP16 TFLOPS and memory bandwidth alone cannot predict this miner's performance across architectures.
+
+Measure rather than assume:
+
+```bash
+npm run benchmark -- --gpus 0 --seconds 30 --runs 3 --warmup-seconds 5
+npm run benchmark -- --seconds 30 --runs 3 --warmup-seconds 5
+```
+
+Use median **wall-clock GH/s**, with clocks, temperature and power stable. For rentals, compare that measured aggregate rate against the **whole instance's hourly cost**, not just the GPU's listing price. For owned hardware, compare GH/s per watt as well. These efficiency measures are not a profitability forecast: stale work, RPC latency, competition, mint price, gas and NFT/token value still matter. An expensive large-VRAM accelerator is not automatically the best-value miner, and this repository has no validated GPU rental ranking.
+
+## 2. Set up a signing wallet
+
+You do **not** need MetaMask, WalletConnect, an open browser or per-mint phone approval. The controller uses an account's signing key on the machine running it. Keep recovery phrases out of chat, command-line arguments, logs and this repository.
+
+To import an existing compatible mnemonic-based wallet—for example, a dedicated Robinhood Wallet account on an iPhone—copy its full public EVM address and run this yourself in an interactive terminal, replacing the placeholder:
+
+```bash
+npm run wallet -- import --address 0xYOUR_FULL_WALLET_ADDRESS
 ```
 
 The hidden prompts ask for the recovery phrase and a new keystore password. The importer requires the derived address to match the address you supplied. It saves only that account's encrypted key, not the recovery phrase. The default derivation path is `m/44'/60'/0'/0/0`; if it does not match, stop and resolve the account/path choice. Do not fund an unexpected address.
@@ -127,3 +210,17 @@ Developer tuning: `HASHCATS_UNROLL=1|2|4|8|24` and `HASHCATS_REGISTERS=64|72|80|
 Finding a proof is a lottery, not accumulating partial progress. The screenshot's **42/49 bits** is not “seven bits left to finish.” A new cat or expired anchor can invalidate even a real qualifying proof before inclusion. The mint still costs ETH, and a reverted transaction can spend gas without delivering a cat.
 
 See [prioritized next steps](NEXT-STEPS.md), [implementation and test evidence](IMPLEMENTATION.md), [protocol/mining plan](NATIVE-MINING-PLAN.md), [findings and source ledger](FINDINGS.md), and [wallet design](NATIVE-WALLET-WORKFLOW.md).
+
+## Support and contact
+
+If this project helps you and you would like to support its continued development, donations are welcome at:
+
+**Robinhood Chain (chain ID 4663), native ETH:** [`0xDB4d4abb19AAe5Be15f30ee75c2a2ba047bAB78D`](https://robinhoodchain.blockscout.com/address/0xDB4d4abb19AAe5Be15f30ee75c2a2ba047bAB78D)
+
+Verify the full address and network before sending. Cryptocurrency transfers are irreversible. Do not send assets on a network you cannot recover from.
+
+For setup questions, bug reports, performance results or further help, open a GitHub issue in this repository or contact **Ahmed Hamza** at [ahmed@hamza.my.id](mailto:ahmed@hamza.my.id). Never include a recovery phrase, private key, keystore password or other secret in an issue or email.
+
+## License
+
+Hashcats Native is available under the [MIT License](LICENSE).

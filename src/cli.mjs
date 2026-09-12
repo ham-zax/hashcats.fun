@@ -3,13 +3,7 @@ import { join, resolve } from "node:path";
 import { homedir } from "node:os";
 import { existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
-import {
-  Wallet,
-  getAddress,
-  parseEther,
-  formatEther,
-  ZeroAddress,
-} from "ethers";
+import { Wallet, getAddress, parseEther, formatEther } from "ethers";
 import {
   CHAIN_ID,
   COLLECTION,
@@ -30,19 +24,22 @@ import {
 } from "./wallet.mjs";
 import { Journal } from "./journal.mjs";
 import { Submitter } from "./submitter.mjs";
-import { Gpu, randomNoncePrefix } from "./gpu.mjs";
+import { listGpus } from "./gpu.mjs";
+import { GpuPool } from "./gpu-pool.mjs";
 import { checkGpu, mine } from "./miner.mjs";
+import { benchmark } from "./benchmark.mjs";
 
 const HELP = `Hashcats Native — CUDA mining with local signing
 
   npm start -- doctor
+  npm start -- devices
   npm run wallet -- import --address 0xYOUR_IPHONE_ADDRESS
   npm run wallet -- create
   npm run wallet -- address
   npm run wallet -- check
   npm start -- status [--address 0x...]
   npm start -- watch [--address 0x...] [--seconds 30]
-  npm run benchmark -- --seconds 10 [--threads 128]
+  npm run benchmark -- --seconds 30 [--runs 3] [--warmup-seconds 5] [--threads 128] [--report reports/bench.json]
   npm start -- mine --address 0x... --seconds 30          (shadow; never sends)
   npm start -- mine --live --max-price 0.09 --budget 0.10 (ETH; unlocks once)
   npm start -- recover --max-price 0.09 --budget 0.10 [--live]
@@ -56,7 +53,11 @@ Options:
   --seconds N          Stop searching after N seconds; 0 means unlimited
   --poll-ms N          Chain polling interval; default 500
   --threads 128|256    CUDA thread-block size; default 128
+  --gpus all|0,1,...    CUDA-visible device indices; default all
   --batch-ms N         Adaptive batch target, 1–50 ms; default 15
+  --runs N             Benchmark runs; default 3
+  --warmup-seconds N   Benchmark warmup; default 5
+  --report PATH        Write benchmark JSON report (mode 0600)
   --derivation-path P  Import only; default m/44'/60'/0'/0/0
   --mnemonic-passphrase  Ask for the original optional mnemonic passphrase
 
@@ -84,12 +85,16 @@ async function main() {
       rpc: { type: "string", multiple: true },
       seconds: { type: "string" },
       threads: { type: "string" },
+      gpus: { type: "string" },
       "max-price": { type: "string" },
       budget: { type: "string" },
       "max-gas-eth": { type: "string" },
       "max-cats": { type: "string" },
       "poll-ms": { type: "string" },
       "batch-ms": { type: "string" },
+      runs: { type: "string" },
+      "warmup-seconds": { type: "string" },
+      report: { type: "string" },
       "derivation-path": { type: "string" },
       "mnemonic-passphrase": { type: "boolean" },
     },
@@ -113,6 +118,8 @@ async function main() {
     throw new Error("Threads must be 128 or 256");
   checkGoldenVectors();
 
+  if (command === "devices") return console.log(json(await listGpus()));
+
   if (command === "doctor") {
     console.log(`Node ${process.version}; CPU golden vectors: PASS`);
     console.log(
@@ -127,7 +134,7 @@ async function main() {
       { encoding: "utf8", timeout: 5000 },
     );
     if (smi.status === 0) console.log(smi.stdout.trim());
-    const gpu = new Gpu();
+    const gpu = new GpuPool({ selection: values.gpus ?? "all" });
     try {
       console.log(json({ gpu: await checkGpu(gpu) }));
     } finally {
@@ -188,50 +195,30 @@ async function main() {
   }
 
   if (command === "benchmark") {
-    const gpu = new Gpu();
-    try {
-      console.log(json({ gpu: await checkGpu(gpu) }));
-      const job = {
-        miner: ZeroAddress,
-        prev: 0n,
-        anchor: `0x${"00".repeat(32)}`,
-        target: 0n,
-      };
-      const prefix = randomNoncePrefix();
-      let counter = 0n,
-        count = 65536,
-        hashes = 0,
-        kernelMs = 0;
-      const start = Date.now(),
-        duration = (seconds || 10) * 1000;
-      while (Date.now() - start < duration) {
-        const result = await gpu.batch(job, prefix, counter, count, {
-          threads,
-        });
-        counter += BigInt(count);
-        hashes += count;
-        kernelMs += result.ms;
-        count =
-          Math.max(
-            4096,
-            Math.min(
-              1 << 24,
-              Math.round((count * 15) / Math.max(result.ms, 0.1)),
-            ),
-          ) & ~127;
-      }
-      console.log(
-        json({
-          hashes,
-          seconds: (Date.now() - start) / 1000,
-          wallMHs: hashes / (Date.now() - start) / 1000,
-          kernelMHs: hashes / kernelMs / 1000,
-          threads,
-        }),
-      );
-    } finally {
-      gpu.close();
-    }
+    const report = await benchmark({
+      gpus: values.gpus ?? "all",
+      seconds: numberOption(values.seconds, 30, 1, 3600, "seconds"),
+      runs: numberOption(values.runs, 3, 1, 10, "runs"),
+      warmupSeconds: numberOption(
+        values["warmup-seconds"],
+        5,
+        0,
+        60,
+        "warmup-seconds",
+      ),
+      threads,
+      targetMs: numberOption(values["batch-ms"], 15, 1, 50, "batch-ms"),
+      reportPath: values.report,
+      signal: shutdownSignal(),
+      onEvent: (event) => console.log(json(event)),
+    });
+    console.log(
+      json({
+        medianWallMHs: report.medianWallMHs,
+        completed: report.completed,
+        reportPath: values.report ?? null,
+      }),
+    );
     return;
   }
 
@@ -269,6 +256,7 @@ async function main() {
     return console.log(
       json(
         await mine({
+          gpus: values.gpus ?? "all",
           rpc,
           address,
           seconds,
@@ -341,6 +329,7 @@ async function main() {
     console.log(
       json(
         await mine({
+          gpus: values.gpus ?? "all",
           rpc,
           address,
           submitter,

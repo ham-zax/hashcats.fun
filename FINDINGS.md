@@ -113,3 +113,14 @@ No CUDA miner, signer, paid transaction, 24-hour monitor or OS/GPU configuration
 Khiip archived the two worker URLs and NVIDIA documentation; capture identifiers and raw artifact paths are in the plan. Use the raw compressed artifacts when checking JavaScript, because Markdown conversion alters code characters. Browser observations above were transcribed from timestamped tool output; no screenshot artifact or complete browser network audit was produced.
 
 Suggested manually assignable `opencode2` packages are in section 10 of the plan: protocol verification, offline CUDA search, watcher/unsigned submission, then integration.
+
+## Public deployment and hardware guidance — 2026-09-12 follow-up
+
+The implementation has advanced since the original investigation above; use [IMPLEMENTATION.md](IMPLEMENTATION.md) for current completion/test status and [README.md](README.md) for installation. This follow-up checks the public deployment wording, not current protocol economics.
+
+- Local evidence: `package.json` installs Node dependencies but has no install-time driver/toolchain provisioning or native build hook. `scripts/build.mjs` requires a CUDA NVRTC installation and a C++ compiler; its header-download fallback assumes NVIDIA apt packages are already available. Cloning and `npm install` alone are not sufficient. No clean rented-host install has been tested.
+- Local evidence: `native/keccak.cu` performs integer/bitwise Keccak, with no tensor-core or floating-point operations and no large DAG/model allocation. The hardware-selection inference is to measure sustained verified hash throughput, not rank by VRAM capacity or AI TFLOPS. This does not establish a measured hardware bottleneck or a ranking of GPU models.
+- NVIDIA's [CUDA Best Practices Guide](https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/) describes instruction throughput and the tradeoffs among register usage, occupancy and spilling. It supports benchmark-first guidance, not a guaranteed native/WebGPU speed ratio. Khiip capture: `01M2B83QH0G46K87DSR0YJ4PRB`.
+- [Vast.ai SSH documentation](https://docs.vast.ai/guides/instances/connect/ssh), [Shadeform's introduction](https://docs.shadeform.ai/getting-started/introduction), and [Lambda's cloud introduction](https://docs.lambda.ai/public-cloud/) establish the provider/server context used in the README. They do **not** establish this miner's compatibility, profitability or permission to mine on any particular offering. Provider integrations, policies, pricing and physical multi-GPU scaling were not validated. Khiip captures, respectively: `01M2BYX494YDDH6EFVT5DQQWB4`, `01M2BYX5626T2WPWHRV3S94NWK`, `01M2BYX5RHZPFP89YFXZFHG3KW`.
+
+Research was performed directly without subagents. Open WebSearch's Startpage queries returned no results and its Bing fallback returned HTTP 301 errors; fallback web retrieval opened the primary pages above. The running Khiip daemon archived all four pages with provenance.

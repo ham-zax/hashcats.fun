@@ -11,6 +11,7 @@ Working tree: `/home/hamza/repo/hashcat`, branch `feat/native-miner`. No subagen
 | Pinned, checked chain snapshots and RPC compatibility | `src/rpc.mjs` |
 | CUDA search / NVRTC driver worker | `native/keccak.cu`, `native/worker.cpp`, `src/gpu.mjs` |
 | Watching, bounded batch scheduling and candidate handling | `src/miner.mjs` |
+| Single-PC GPU discovery, selection and parallel nonce allocation | `src/gpu-pool.mjs`, `src/gpu.mjs`, `native/worker.cpp` |
 | Signing, broadcast, receipt verification and recovery | `src/submitter.mjs`, `src/journal.mjs` |
 | Reproducible build and million-digest comparison | `scripts/build.mjs`, `scripts/verify-gpu.mjs` |
 
@@ -39,8 +40,13 @@ Machine: NVIDIA GeForce RTX 3070 Ti, compute capability 8.6, WSL CUDA driver, CU
 | Explicit funnel shifts, 72-register cap | 1.079 | 15 seconds; regression |
 | Explicit funnel shifts plus constant padding lanes | 1.131 | 15 seconds, compiler used 72 registers despite cap 80; regression |
 | Restored selected default, final longer run | 1.088 | 30.011 seconds, 32,644,375,168 hashes; internal timer 1.136 GH/s |
+| Selected default, 128 threads, repeatable harness (new) | 1.176 / 1.192 / 1.193 | 3×30 s + 5 s warmup, median 1.192; kernel 1.230-1.241; batch p50 ~14 ms; 72-75C, ~255 W; `reports/bench-128.json` |
+| Selected default, 256 threads, repeatable harness (new) | 1.170 / 1.167 / 1.154 | 3×30 s + 5 s warmup, median 1.167; kernel 1.207-1.221; 128 threads retained; `reports/bench-256.json` |
+| Reverted: async stream + pinned staging + scoped theta temps | 1.159 / 1.154 / 1.072 | 3×30 s median 1.154 < 1.192 baseline; kernel also slower (1.20 vs 1.24), so not thermal alone; reverted to baseline, 10k digests PASS after restore; `reports/bench-async-128.json` |
 
-At this checkpoint, native has **not beaten the browser**. The final 30-second run was slower than the earlier 10-second best, so **1.19 GH/s must not be described as guaranteed sustained performance**. The cause of the run-to-run difference is not yet established. Differences across short runs should not be promoted as improvements without repeated comparisons and clock/power/temperature observations. The independent benefit already implemented is local automatic submission and recoverable transaction identity.
+Repeatable harness: `npm run benchmark -- --seconds 30 --runs 3 --warmup-seconds 5 --threads 128 --report reports/bench-128.json`. Kernel `7aacc0577f0a`, unroll 24, 80-register cap, `sm_86` 3070 Ti, Node 24.19.0, display GPU, browser closed.
+
+At this checkpoint, native has **not beaten the browser** (1.25–1.30). The earlier 1.088 single 30 s run is superseded by the 1.192 median; short-run 1.19-1.193 differences are within run variance. The independent benefit already implemented is local automatic submission and recoverable transaction identity.
 
 The default was restored to the best checked 64-bit implementation: full 24-round unrolling, 80-register compiler cap and 128-thread blocks. Explicit funnel-shift and constant-padding changes were reverted because they did not establish an improvement. Source kernels always execute the complete Keccak-f1600 permutation. Batches are bounded to protect job-refresh latency; larger batches may improve benchmark throughput while increasing stale time. See [NEXT-STEPS.md](NEXT-STEPS.md) for the next measurement and alternative-kernel experiment, including an optional opencode2 handoff.
 
@@ -49,6 +55,20 @@ For the screenshot's approximate 49-bit target, `2^49 / (1.26e9)` is about **5.1
 ## Source provenance for tuning
 
 NVIDIA's [integer intrinsic documentation](https://docs.nvidia.com/cuda/cuda-math-api/cuda_math_api/group__CUDA__MATH__INTRINSIC__INT.html) and locally installed CUDA 13.1 `sm_32_intrinsics.h/.hpp` were checked for funnel-shift semantics. Open WebSearch discovery returned no useful result; the primary documentation was then opened directly. The documentation was archived through the existing Khiip daemon as capture **`01M2BB5R74AKNVBG3XWDNMR39Y`**. This establishes API behavior, not a performance improvement.
+
+## Single-PC multi-GPU implementation
+
+`mine`, `benchmark` and `doctor` now default to all CUDA-visible devices. `devices` lists indices/UUIDs without starting a mining context; `--gpus 0,1` selects a subset. Native workers select their assigned CUDA device and compile for that device's compute capability. The build now locates common Linux driver-library paths as well as WSL's.
+
+The host pool dispatches distinct contiguous counter ranges concurrently, adapts the work split to measured per-device throughput, and keeps one shared submission/journal owner. It verifies golden hashes on every selected GPU and rejects candidates outside the reporting worker's assigned range. Worker errors stop the complete pool. Results wait for the slowest assigned worker in each bounded batch; this is not an independent persistent dispatcher per GPU.
+
+- **34 automated tests passed**, including ten new pool tests covering selection, weighted allocation, concurrency, carry boundaries, per-device golden checks, out-of-order diagnostic results, cross-device nonce rejection, startup/runtime failure cleanup, cancellation, shared submission and benchmark accounting. The prior final nonce/freshness regression tests still pass.
+- `npm run build` succeeds with warnings treated as errors. CUDA enumeration reports the one physical RTX 3070 Ti. Selecting absent device 1 correctly fails before a benchmark starts.
+- The rebuilt worker through the default pool passed **1,000,000 full CUDA/CPU digest comparisons**, carry/high-bit boundaries, uint256 limit, strict target equality, candidate output and overflow checks on the physical 3070 Ti.
+- Initial single-device pool smoke benchmark: **1.236 GH/s wall-clock**, one 3-second run after 1-second warmup. This is a smoke result, not sustained-performance evidence or a speedup over the reported browser baseline.
+- Multi-device behavior is tested with up to three simulated workers; **physical multi-GPU scaling has not been measured**. No additional GPU, wallet or paid mint is claimed.
+
+Commands, device-index remapping and operating limits are documented in [README.md](README.md#multiple-gpus-in-one-pc). The CUDA hash kernel itself is unchanged.
 
 ## Remaining operational gates
 

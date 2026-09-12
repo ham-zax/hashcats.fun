@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { Gpu } from "../src/gpu.mjs";
+import { GpuPool } from "../src/gpu-pool.mjs";
 import { checkGpu } from "../src/miner.mjs";
 import { workHash, MAX_UINT256 } from "../src/protocol.mjs";
 
@@ -8,7 +8,7 @@ const total = Number(process.argv[2] ?? 1000000);
 if (!Number.isSafeInteger(total) || total < 1)
   throw new Error("Provide a positive comparison count");
 const bytes = (label) => createHash("sha256").update(label).digest("hex");
-const gpu = new Gpu();
+const gpu = new GpuPool({ selection: process.env.HASHCATS_GPUS ?? "all" });
 try {
   console.log(await checkGpu(gpu));
   let checked = 0,
@@ -74,7 +74,12 @@ try {
     /Invalid GPU nonce range/,
   );
   await assert.rejects(
-    gpu.batch({ ...job, target: MAX_UINT256 }, 0n, 0n, 256),
+    gpu.batch(
+      { ...job, target: MAX_UINT256 },
+      0n,
+      0n,
+      256 * gpu.workers.length,
+    ),
     /candidate buffer overflow/,
   );
   console.log(

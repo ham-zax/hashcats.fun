@@ -51,8 +51,14 @@ if (
   include = join(cache, "usr/local/cuda-13.1/targets/x86_64-linux/include");
 }
 const driver =
-  process.env.HASHCATS_CUDA_DRIVER ?? "/usr/lib/wsl/lib/libcuda.so.1";
-if (!existsSync(driver))
+  process.env.HASHCATS_CUDA_DRIVER ??
+  [
+    "/usr/lib/wsl/lib/libcuda.so.1",
+    "/usr/lib/x86_64-linux-gnu/libcuda.so.1",
+    "/usr/lib64/libcuda.so.1",
+    "/usr/local/nvidia/lib64/libcuda.so.1",
+  ].find(existsSync);
+if (!driver || !existsSync(driver))
   throw new Error(`Set HASHCATS_CUDA_DRIVER to your libcuda.so.1 path`);
 mkdirSync(join(root, "build"), { recursive: true });
 run("g++", [
