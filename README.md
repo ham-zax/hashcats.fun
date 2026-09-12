@@ -20,6 +20,37 @@ Implemented: chain snapshots, full-target CUDA search, independent CPU checks, e
 
 ## 1. Build and check
 
+### Automatic setup
+
+After cloning and entering the repository, run:
+
+```bash
+bash scripts/setup.sh
+source scripts/env.sh
+```
+
+You do not need Node installed to start this Bash script. It checks the host, installs missing system packages using root/sudo when necessary, installs Node 24.21.0 inside ignored `.tools/node` if no compatible Node/npm is available, and installs the required CUDA 13.1 NVRTC components and development headers. Node downloads are checked against the official SHA-256 manifest. `source scripts/env.sh` makes a locally installed Node available to subsequent `npm` commands in your terminal; repeat it in a new shell.
+
+The script then installs the project's locked dependencies, builds the worker, lists GPUs, runs automated tests, compares 10,000 CUDA hashes with the CPU reference, and performs a short offline benchmark. It does not import a wallet or start paid mining. If a check fails, setup stops with a nonzero exit status. Rerunning reuses compatible system dependencies, but reinstalls the project's npm dependencies and rebuilds/rechecks the miner.
+
+Automatic CUDA package installation supports **Ubuntu 22.04/24.04, Debian 12/13 and Ubuntu under WSL2**, on x86-64. It adds NVIDIA's official CUDA apt keyring/repository and installs specific NVRTC/header packages. Other Linux distributions can use the build/check path when prerequisites are already installed; the installer will not substitute another distribution's repository. A custom `HASHCATS_CUDA_ROOT` must already be complete.
+
+To inspect dependencies without changing anything:
+
+```bash
+bash scripts/setup.sh --check
+```
+
+For an Ubuntu host with a missing NVIDIA driver:
+
+```bash
+bash scripts/setup.sh --install-driver
+```
+
+This allows Ubuntu's recommended driver installation. Setup then stops so you can reboot if needed and rerun it. It never reboots automatically. On **WSL**, install/update the NVIDIA driver on Windows; the script does not install a Linux display driver. In a **container**, the provider/host must expose its NVIDIA devices and driver libraries first. A script inside the container cannot provision missing physical GPUs. The final CUDA checks detect driver/toolkit incompatibilities that a successful `nvidia-smi` check alone cannot establish.
+
+`npm run setup` is also available if Node/npm is already installed. Full installation from a clean cloud image has not yet been tested; see [SETUP.md](SETUP.md) for implementation details and verification evidence.
+
 ### Is cloning and `npm install` enough?
 
 **No. The source is included, but NVIDIA drivers and the CUDA toolchain are external prerequisites.** `npm install` (or `npm i`) installs JavaScript dependencies; it does not install a driver, enable GPU passthrough, install the NVRTC runtime, or compile the miner. Use `npm ci --ignore-scripts` for the lockfile-pinned install, then explicitly build.
@@ -84,7 +115,7 @@ Validation here uses three simulated GPU workers plus the one physical RTX 3070 
 
 The intended deployment model is **one compatible Linux GPU host, reached over SSH**. That can be your own server or an instance obtained through services such as [Vast.ai](https://docs.vast.ai/guides/instances/connect/ssh), [Shadeform](https://docs.shadeform.ai/getting-started/introduction), or [Lambda](https://docs.lambda.ai/public-cloud/). These links describe provider access/services, not tested integrations or endorsements. **No deployment on these providers has been validated for this repository.** It will not run on literally any server: the prerequisites above and actual CUDA device access are required.
 
-Before paying for an instance, confirm that the provider permits this workload and that its selected image offers a long-running shell, NVIDIA GPU access, a compatible driver/toolkit, and persistent storage. Serverless inference endpoints are not interchangeable with an SSH-accessible GPU machine. No provider API, paid service, container image or one-click installer is bundled here.
+Before paying for an instance, confirm that the provider permits this workload and that its selected image offers a long-running shell, NVIDIA GPU access, a compatible driver/toolkit, and persistent storage. Serverless inference endpoints are not interchangeable with an SSH-accessible GPU machine. A dependency installer is included; no provider API integration or container image is bundled here.
 
 1. Provision the compatible host yourself and connect over SSH. For a container, ensure the host exposes the GPU devices and NVIDIA driver libraries to it.
 2. Clone, install, build and run the checks above. Benchmark **before importing or funding a wallet**. Test each GPU separately if comparing models, then test the combined configuration.

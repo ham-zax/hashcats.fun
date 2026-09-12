@@ -8,6 +8,7 @@
     "node": ">=22"
   },
   "scripts": {
+    "setup": "bash scripts/setup.sh",
     "start": "node src/cli.mjs",
     "wallet": "node src/cli.mjs wallet",
     "doctor": "node src/cli.mjs doctor",

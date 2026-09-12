@@ -6,11 +6,13 @@ import { spawnSync } from "node:child_process";
 const root = fileURLToPath(new URL("../", import.meta.url));
 const cuda = process.env.HASHCATS_CUDA_ROOT ?? "/usr/local/cuda-13.1";
 const lib = join(cuda, "targets/x86_64-linux/lib");
-const library = readdirSync(lib).find((name) =>
+const library = (existsSync(lib) ? readdirSync(lib) : []).find((name) =>
   /^libnvrtc\.so\.\d+$/.test(name),
 );
 if (!library)
-  throw new Error(`NVRTC not found in ${lib}; set HASHCATS_CUDA_ROOT`);
+  throw new Error(
+    `NVRTC not found in ${lib}; run bash scripts/setup.sh or set HASHCATS_CUDA_ROOT`,
+  );
 let include = join(cuda, "targets/x86_64-linux/include");
 const cachedInclude = join(
   root,
